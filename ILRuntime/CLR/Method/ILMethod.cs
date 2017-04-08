@@ -25,6 +25,7 @@ namespace ILRuntime.CLR.Method
         Dictionary<int, int[]> jumptables;
         bool isDelegateInvoke;
         ILRuntimeMethodInfo refletionMethodInfo;
+        ILRuntimeConstructorInfo reflectionCtorInfo;
         int paramCnt, localVarCnt;
         Mono.Collections.Generic.Collection<Mono.Cecil.Cil.VariableDefinition> variables;
         int hashCode = -1;
@@ -44,9 +45,23 @@ namespace ILRuntime.CLR.Method
         {
             get
             {
+                if (IsConstructor)
+                    throw new NotSupportedException();
                 if (refletionMethodInfo == null)
                     refletionMethodInfo = new ILRuntimeMethodInfo(this);
                 return refletionMethodInfo;
+            }
+        }
+
+        public ConstructorInfo ReflectionConstructorInfo
+        {
+            get
+            {
+                if (!IsConstructor)
+                    throw new NotSupportedException();
+                if (reflectionCtorInfo == null)
+                    reflectionCtorInfo = new ILRuntimeConstructorInfo(this);
+                return reflectionCtorInfo;
             }
         }
 
@@ -438,7 +453,7 @@ namespace ILRuntime.CLR.Method
         int GetTypeTokenHashCode(object token)
         {
             var t = appdomain.GetType(token, declaringType, this);
-            bool isGenericParameter = token is TypeReference && ((TypeReference)token).IsGenericParameter;
+            bool isGenericParameter = CheckHasGenericParamter(token);
             if (t == null && isGenericParameter)
             {
                 t = FindGenericArgument(((TypeReference)token).Name);
@@ -447,16 +462,43 @@ namespace ILRuntime.CLR.Method
             {
                 if (t is ILType)
                 {
-                    return ((ILType)t).TypeReference.GetHashCode();
+                    if (((ILType)t).TypeReference.HasGenericParameters)
+                        return t.GetHashCode();
+                    else
+                        return ((ILType)t).TypeReference.GetHashCode();
                 }
                 else if (isGenericParameter)
                 {
-                    return t.TypeForCLR.GetHashCode();
+                    return t.GetHashCode();
                 }
                 else
                     return token.GetHashCode();
             }
             return 0;
+        }
+
+        bool CheckHasGenericParamter(object token)
+        {
+            if (token is TypeReference)
+            {
+                TypeReference _ref = ((TypeReference)token);
+                if (_ref.IsGenericParameter)
+                    return true;
+                if (_ref.IsGenericInstance)
+                {
+                    GenericInstanceType gi = (GenericInstanceType)_ref;
+                    foreach(var i in gi.GenericArguments)
+                    {
+                        if (CheckHasGenericParamter(i))
+                            return true;
+                    }
+                    return false;
+                }
+                else
+                    return false;
+            }
+            else
+                return false;
         }
 
         void PrepareJumpTable(object token, Dictionary<Mono.Cecil.Cil.Instruction, int> addr)
